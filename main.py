@@ -7,17 +7,23 @@ from statsmodels.tsa.arima.model import ARIMA
 from prophet import Prophet
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
+import os
 
-# Генерация примеров временных рядов с уменьшенным шумом
+# Создание директории для сохранения графиков, если она не существует
+output_dir = "plots"
+os.makedirs(output_dir, exist_ok=True)
+
+# Генерация временных рядов для тестирования различных моделей
 np.random.seed(0)
 time = np.arange(0, 100)
-linear_series = 2 * time + 10 + np.random.normal(0, 2, size=time.shape)
-exponential_series = 2 ** (time / 20) + np.random.normal(0, 2, size=time.shape)
-quadratic_series = 0.05 * time**2 + 3 * time + 5 + np.random.normal(0, 3, size=time.shape)
-cubic_series = 0.001 * time**3 - 0.1 * time**2 + time + np.random.normal(0, 5, size=time.shape)
-sinusoidal_series = 50 * np.sin(time / 10) + np.random.normal(0, 2, size=time.shape)
-stationary_series = np.random.normal(0, 3, size=time.shape)
+linear_series = 2 * time + 10 + np.random.normal(0, 5, size=time.shape)  # Линейный тренд с шумом
+exponential_series = 2 ** (time / 20) + np.random.normal(0, 5, size=time.shape)  # Экспоненциальный тренд
+quadratic_series = 0.05 * time ** 2 + 3 * time + 5 + np.random.normal(0, 5, size=time.shape)  # Квадратичный тренд
+cubic_series = 0.001 * time ** 3 - 0.1 * time ** 2 + time + np.random.normal(0, 5, size=time.shape)  # Кубический тренд
+sinusoidal_series = 50 * np.sin(time / 10) + np.random.normal(0, 5, size=time.shape)  # Синусоидальный тренд
+stationary_series = np.random.normal(0, 5, size=time.shape)  # Стационарный шумовой ряд
 
+# Список временных рядов с их именами для дальнейшего анализа
 time_series_list = [
     ("Линейный рост", linear_series),
     ("Экспоненциальный рост", exponential_series),
@@ -27,60 +33,96 @@ time_series_list = [
     ("Стационарный ряд", stationary_series)
 ]
 
-# Функция для полиномиальной регрессии
-def polynomial_regression(train_data, test_length, degree):
-    X_train = np.arange(len(train_data)).reshape(-1, 1)
-    poly_features = PolynomialFeatures(degree=degree)
-    X_poly_train = poly_features.fit_transform(X_train)
+
+# Функция полиномиальной регрессии, которая настраивает модель и предсказывает данные для заданной степени полинома
+def polynomial_regression(train_series, test_length, degree):
+    """
+    Выполняет полиномиальную регрессию для прогноза временного ряда.
+
+    Параметры:
+    - train_series: обучающий временной ряд
+    - test_length: длина тестового периода для прогноза
+    - degree: степень полинома для регрессии
+
+    Возвращает:
+    - прогнозные значения для тестового периода
+    """
+    # Подготовка входных данных для полиномиальной регрессии
+    X_train = np.arange(len(train_series)).reshape(-1, 1)
+    poly_features = PolynomialFeatures(degree=degree)  # Создание полиномиальных признаков
+    X_poly = poly_features.fit_transform(X_train)
+
+    # Обучение линейной регрессионной модели на полиномиальных признаках
     model = LinearRegression()
-    model.fit(X_poly_train, train_data)
+    model.fit(X_poly, train_series)
 
-    # Прогноз на данные тренировки + тест
-    X_future = np.arange(len(train_data) + test_length).reshape(-1, 1)
-    X_poly_future = poly_features.transform(X_future)
-    y_pred = model.predict(X_poly_future)
-    return y_pred[-test_length:]
-
-# Функция для ARIMA
-def arima_model(train_data, test_length, order=(5, 1, 0)):
-    model = ARIMA(train_data, order=order)
-    fitted_model = model.fit()
-    y_pred = fitted_model.predict(start=len(train_data), end=len(train_data) + test_length - 1)
+    # Генерация прогноза на тестовом периоде
+    X_test = np.arange(len(train_series), len(train_series) + test_length).reshape(-1, 1)
+    X_test_poly = poly_features.transform(X_test)
+    y_pred = model.predict(X_test_poly)
     return y_pred
 
-# Функция для Prophet
-def prophet_model(train_data, test_length):
+
+# Функция ARIMA для временных рядов, которая строит модель и предсказывает значения
+def arima_model(train_series, test_length, order=(5, 1, 0)):
+    """
+    Выполняет прогноз с помощью модели ARIMA.
+
+    Параметры:
+    - train_series: обучающий временной ряд
+    - test_length: длина тестового периода для прогноза
+    - order: порядок модели ARIMA
+
+    Возвращает:
+    - прогнозные значения для тестового периода
+    """
+    model = ARIMA(train_series, order=order)
+    fitted_model = model.fit()
+    y_pred = fitted_model.predict(start=len(train_series), end=len(train_series) + test_length - 1)
+    return y_pred
+
+
+# Функция для модели Prophet, которая подготавливает данные, обучает модель и предсказывает значения
+def prophet_model(train_series, test_length):
+    """
+    Выполняет прогноз с помощью модели Prophet.
+
+    Параметры:
+    - train_series: обучающий временной ряд
+    - test_length: длина тестового периода для прогноза
+
+    Возвращает:
+    - прогнозные значения для тестового периода
+    """
+    # Подготовка данных в формате Prophet
     df = pd.DataFrame({
-        'ds': pd.date_range(start='2020-01-01', periods=len(train_data), freq='D'),
-        'y': train_data
+        'ds': pd.date_range(start='2020-01-01', periods=len(train_series), freq='D'),
+        'y': train_series
     })
     model = Prophet()
     model.fit(df)
 
-    # Прогноз на будущее
+    # Создание фрейма данных для прогноза на заданный тестовый период
     future = model.make_future_dataframe(periods=test_length)
     forecast = model.predict(future)
-    return forecast['yhat'].values[-test_length:]
 
-# Оценка всех моделей на каждом ряде
-results = []
+    # Извлечение прогнозных значений только для тестового периода
+    y_pred = forecast['yhat'].iloc[-test_length:]
+    return y_pred.values
 
+
+# Основной цикл по временным рядам и моделям, сохранение графиков для каждого варианта
 for name, series in time_series_list:
-    print(f"\nАнализ временного ряда: {name}")
-
-    # Определение тестовой длины (20% от общего числа)
+    # Определяем длину тестовой выборки как 20% от общего объема данных
     test_length = int(0.2 * len(series))
-    train_data = series[:-test_length]  # Данные для обучения
-    test_data = series[-test_length:]   # Истинные значения для теста
+    train_data = series[:-test_length]  # Обучающие данные
+    test_data = series[-test_length:]  # Тестовые данные
 
-    # Прогнозы полиномиальной регрессии для разных степеней
-    scores_poly = {}
+    # Прогноз с полиномиальной регрессией для разных степеней
     for degree in [1, 2, 3]:
         y_pred = polynomial_regression(train_data, test_length, degree)
-        mse = mean_squared_error(test_data, y_pred)
-        scores_poly[f"Полиномиальная регрессия (степень {degree})"] = mse
 
-        # Визуализация: прогноз vs. истинные значения
+        # Построение графика и сохранение для полиномиальной регрессии
         plt.figure(figsize=(12, 6))
         plt.plot(np.arange(len(series)), series, label="Истинные значения")
         plt.plot(np.arange(len(train_data), len(series)), y_pred, label=f"Прогноз (степень {degree})", linestyle='--')
@@ -88,13 +130,15 @@ for name, series in time_series_list:
         plt.ylabel("Значение")
         plt.legend()
         plt.title(f"{name} - Полиномиальная регрессия (степень {degree})")
-        plt.show()
 
-    # Прогнозы модели ARIMA
+        # Сохранение графика в файл
+        plt.savefig(os.path.join(output_dir, f"{name}_poly_degree_{degree}.png"))
+        plt.close()
+
+    # Прогноз с помощью модели ARIMA
     y_pred = arima_model(train_data, test_length)
-    mse = mean_squared_error(test_data, y_pred)
 
-    # Визуализация прогноза ARIMA
+    # Построение графика и сохранение для модели ARIMA
     plt.figure(figsize=(12, 6))
     plt.plot(np.arange(len(series)), series, label="Истинные значения")
     plt.plot(np.arange(len(train_data), len(series)), y_pred, label="Прогноз ARIMA", linestyle='--')
@@ -102,13 +146,15 @@ for name, series in time_series_list:
     plt.ylabel("Значение")
     plt.legend()
     plt.title(f"{name} - ARIMA")
-    plt.show()
 
-    # Прогнозы модели Prophet
+    # Сохранение графика в файл
+    plt.savefig(os.path.join(output_dir, f"{name}_ARIMA.png"))
+    plt.close()
+
+    # Прогноз с помощью модели Prophet
     y_pred = prophet_model(train_data, test_length)
-    mse = mean_squared_error(test_data, y_pred)
 
-    # Визуализация прогноза Prophet
+    # Построение графика и сохранение для модели Prophet
     plt.figure(figsize=(12, 6))
     plt.plot(np.arange(len(series)), series, label="Истинные значения")
     plt.plot(np.arange(len(train_data), len(series)), y_pred, label="Прогноз Prophet", linestyle='--')
@@ -116,32 +162,9 @@ for name, series in time_series_list:
     plt.ylabel("Значение")
     plt.legend()
     plt.title(f"{name} - Prophet")
-    plt.show()
 
-    # Определение лучшей модели по MSE
-    best_poly_model = min(scores_poly, key=scores_poly.get)
-    best_poly_score = scores_poly[best_poly_model]
-    results.append((name, best_poly_model, best_poly_score, "ARIMA", mse, "Prophet", mse))
+    # Сохранение графика в файл
+    plt.savefig(os.path.join(output_dir, f"{name}_Prophet.png"))
+    plt.close()
 
-# Визуализация сравнений MSE для каждой модели и ряда
-labels = [res[0] for res in results]
-best_models = [res[1] for res in results]
-best_scores = [res[2] for res in results]
-arima_scores = [res[4] for res in results]
-prophet_scores = [res[6] for res in results]
-
-# График сравнений MSE для разных моделей и временных рядов
-plt.figure(figsize=(12, 8))
-x = np.arange(len(labels))
-width = 0.2
-
-plt.barh(x - width, best_scores, width, label="Полиномиальная регрессия (лучшая степень)")
-plt.barh(x, arima_scores, width, label="ARIMA")
-plt.barh(x + width, prophet_scores, width, label="Prophet")
-
-plt.xlabel("Среднеквадратичная ошибка (MSE)")
-plt.ylabel("Тип временного ряда")
-plt.yticks(x, labels)
-plt.legend()
-plt.title("Сравнение MSE моделей для разных временных рядов")
-plt.show()
+print("Графики успешно сохранены в директорию 'plots'.")
