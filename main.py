@@ -11,14 +11,13 @@ import matplotlib.pyplot as plt
 # Генерация примеров временных рядов с уменьшенным шумом
 np.random.seed(0)
 time = np.arange(0, 100)
-linear_series = 2 * time + 10 + np.random.normal(0, 2, size=time.shape)  # Линейный рост
-exponential_series = 2 ** (time / 20) + np.random.normal(0, 2, size=time.shape)  # Экспоненциальный рост
-quadratic_series = 0.05 * time ** 2 + 3 * time + 5 + np.random.normal(0, 3, size=time.shape)  # Квадратичный рост
-cubic_series = 0.001 * time ** 3 - 0.1 * time ** 2 + time + np.random.normal(0, 5, size=time.shape)  # Кубический рост
-sinusoidal_series = 50 * np.sin(time / 10) + np.random.normal(0, 2, size=time.shape)  # Синусоидальный тренд
-stationary_series = np.random.normal(0, 3, size=time.shape)  # Стационарный ряд (без тренда)
+linear_series = 2 * time + 10 + np.random.normal(0, 2, size=time.shape)
+exponential_series = 2 ** (time / 20) + np.random.normal(0, 2, size=time.shape)
+quadratic_series = 0.05 * time**2 + 3 * time + 5 + np.random.normal(0, 3, size=time.shape)
+cubic_series = 0.001 * time**3 - 0.1 * time**2 + time + np.random.normal(0, 5, size=time.shape)
+sinusoidal_series = 50 * np.sin(time / 10) + np.random.normal(0, 2, size=time.shape)
+stationary_series = np.random.normal(0, 3, size=time.shape)
 
-# Список временных рядов и их названия
 time_series_list = [
     ("Линейный рост", linear_series),
     ("Экспоненциальный рост", exponential_series),
@@ -28,49 +27,40 @@ time_series_list = [
     ("Стационарный ряд", stationary_series)
 ]
 
-
 # Функция для полиномиальной регрессии
-def polynomial_regression(series, degree, future_steps=20):
-    X = np.arange(len(series)).reshape(-1, 1)
+def polynomial_regression(train_data, test_length, degree):
+    X_train = np.arange(len(train_data)).reshape(-1, 1)
     poly_features = PolynomialFeatures(degree=degree)
-    X_poly = poly_features.fit_transform(X)
+    X_poly_train = poly_features.fit_transform(X_train)
     model = LinearRegression()
-    model.fit(X_poly, series)
+    model.fit(X_poly_train, train_data)
 
-    # Прогноз на будущие значения
-    X_future = np.arange(len(series) + future_steps).reshape(-1, 1)
-    X_future_poly = poly_features.transform(X_future)
-    y_pred = model.predict(X_future_poly)
-
-    mse = mean_squared_error(series, y_pred[:len(series)])
-    return mse, y_pred
-
+    # Прогноз на данные тренировки + тест
+    X_future = np.arange(len(train_data) + test_length).reshape(-1, 1)
+    X_poly_future = poly_features.transform(X_future)
+    y_pred = model.predict(X_poly_future)
+    return y_pred[-test_length:]
 
 # Функция для ARIMA
-def arima_model(series, order=(5, 1, 0), future_steps=20):
-    model = ARIMA(series, order=order)
+def arima_model(train_data, test_length, order=(5, 1, 0)):
+    model = ARIMA(train_data, order=order)
     fitted_model = model.fit()
-    y_pred = fitted_model.predict(start=0, end=len(series) + future_steps - 1)
-    mse = mean_squared_error(series, y_pred[:len(series)])
-    return mse, y_pred
-
+    y_pred = fitted_model.predict(start=len(train_data), end=len(train_data) + test_length - 1)
+    return y_pred
 
 # Функция для Prophet
-def prophet_model(series, future_steps=20):
+def prophet_model(train_data, test_length):
     df = pd.DataFrame({
-        'ds': pd.date_range(start='2020-01-01', periods=len(series), freq='D'),
-        'y': series
+        'ds': pd.date_range(start='2020-01-01', periods=len(train_data), freq='D'),
+        'y': train_data
     })
     model = Prophet()
     model.fit(df)
 
-    # Прогноз на будущие значения
-    future = model.make_future_dataframe(periods=future_steps)
+    # Прогноз на будущее
+    future = model.make_future_dataframe(periods=test_length)
     forecast = model.predict(future)
-    y_pred = forecast['yhat'].values
-    mse = mean_squared_error(series, y_pred[:len(series)])
-    return mse, y_pred
-
+    return forecast['yhat'].values[-test_length:]
 
 # Оценка всех моделей на каждом ряде
 results = []
@@ -78,65 +68,69 @@ results = []
 for name, series in time_series_list:
     print(f"\nАнализ временного ряда: {name}")
 
-    # Параметры для прогнозирования
-    future_steps = 20  # Количество шагов, на которые будем прогнозировать
+    # Определение тестовой длины (20% от общего числа)
+    test_length = int(0.2 * len(series))
+    train_data = series[:-test_length]  # Данные для обучения
+    test_data = series[-test_length:]   # Истинные значения для теста
 
-    # Полиномиальная регрессия для разных степеней
+    # Прогнозы полиномиальной регрессии для разных степеней
     scores_poly = {}
     for degree in [1, 2, 3]:
-        mse, y_pred = polynomial_regression(series, degree, future_steps=future_steps)
+        y_pred = polynomial_regression(train_data, test_length, degree)
+        mse = mean_squared_error(test_data, y_pred)
         scores_poly[f"Полиномиальная регрессия (степень {degree})"] = mse
 
-        # Визуализация: отображение настоящих данных и прогноза
+        # Визуализация: прогноз vs. истинные значения
         plt.figure(figsize=(12, 6))
-        plt.plot(series, label="Истинные значения")
-        plt.plot(range(len(series), len(series) + future_steps), y_pred[len(series):],
-                 label=f"Прогноз (степень {degree})")
+        plt.plot(np.arange(len(series)), series, label="Истинные значения")
+        plt.plot(np.arange(len(train_data), len(series)), y_pred, label=f"Прогноз (степень {degree})", linestyle='--')
         plt.xlabel("Время")
         plt.ylabel("Значение")
         plt.legend()
         plt.title(f"{name} - Полиномиальная регрессия (степень {degree})")
         plt.show()
 
-    # Модель ARIMA
-    arima_mse, y_pred = arima_model(series, future_steps=future_steps)
+    # Прогнозы модели ARIMA
+    y_pred = arima_model(train_data, test_length)
+    mse = mean_squared_error(test_data, y_pred)
 
     # Визуализация прогноза ARIMA
     plt.figure(figsize=(12, 6))
-    plt.plot(series, label="Истинные значения")
-    plt.plot(range(len(series), len(series) + future_steps), y_pred[len(series):], label="Прогноз ARIMA")
+    plt.plot(np.arange(len(series)), series, label="Истинные значения")
+    plt.plot(np.arange(len(train_data), len(series)), y_pred, label="Прогноз ARIMA", linestyle='--')
     plt.xlabel("Время")
     plt.ylabel("Значение")
     plt.legend()
     plt.title(f"{name} - ARIMA")
     plt.show()
 
-    # Модель Prophet
-    prophet_mse, y_pred = prophet_model(series, future_steps=future_steps)
+    # Прогнозы модели Prophet
+    y_pred = prophet_model(train_data, test_length)
+    mse = mean_squared_error(test_data, y_pred)
 
     # Визуализация прогноза Prophet
     plt.figure(figsize=(12, 6))
-    plt.plot(series, label="Истинные значения")
-    plt.plot(range(len(series), len(series) + future_steps), y_pred[len(series):], label="Прогноз Prophet")
+    plt.plot(np.arange(len(series)), series, label="Истинные значения")
+    plt.plot(np.arange(len(train_data), len(series)), y_pred, label="Прогноз Prophet", linestyle='--')
     plt.xlabel("Время")
     plt.ylabel("Значение")
     plt.legend()
     plt.title(f"{name} - Prophet")
     plt.show()
 
-    # Сохраняем результаты для каждого ряда
+    # Определение лучшей модели по MSE
     best_poly_model = min(scores_poly, key=scores_poly.get)
     best_poly_score = scores_poly[best_poly_model]
-    results.append((name, best_poly_model, best_poly_score, "ARIMA", arima_mse, "Prophet", prophet_mse))
+    results.append((name, best_poly_model, best_poly_score, "ARIMA", mse, "Prophet", mse))
 
-# Визуализация сравнения моделей
+# Визуализация сравнений MSE для каждой модели и ряда
 labels = [res[0] for res in results]
 best_models = [res[1] for res in results]
 best_scores = [res[2] for res in results]
 arima_scores = [res[4] for res in results]
 prophet_scores = [res[6] for res in results]
 
-# График сравнения MSE для каждой модели и каждого ряда
+# График сравнений MSE для разных моделей и временных рядов
 plt.figure(figsize=(12, 8))
 x = np.arange(len(labels))
 width = 0.2
